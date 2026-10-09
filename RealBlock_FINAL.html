@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#65b7e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>RealBlock</title>
+<style>
+*{box-sizing:border-box;-webkit-user-select:none;user-select:none}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#7fc9ef;touch-action:none;font-family:Arial,sans-serif}
+canvas{display:block;width:100%;height:100%}
+#menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(#63b8ec,#d9f3ff);z-index:20}
+.panel{width:min(88%,380px);padding:30px 24px;border-radius:24px;background:#111d;color:#fff;text-align:center;box-shadow:0 18px 60px #0006}
+h1{font-size:42px;margin:0 0 4px;text-shadow:3px 3px #0006}
+.sub{opacity:.9;margin:0 0 20px}
+#play{border:0;border-radius:15px;padding:15px 35px;background:#4caf50;color:#fff;font-size:20px;font-weight:800}
+#hud{position:fixed;inset:0;pointer-events:none}
+#cross{position:absolute;left:50%;top:50%;width:22px;height:22px;transform:translate(-50%,-50%)}
+#cross:before,#cross:after{content:"";position:absolute;background:#fff;box-shadow:0 0 3px #000}
+#cross:before{left:0;top:10px;width:22px;height:2px}
+#cross:after{left:10px;top:0;width:2px;height:22px}
+#info{position:absolute;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:6px 11px;border-radius:12px;background:#0008;color:#fff;font-size:12px}
+#joystick{position:absolute;left:18px;bottom:max(20px,env(safe-area-inset-bottom));width:120px;height:120px;border-radius:50%;background:#0004;border:2px solid #fff7;pointer-events:auto}
+#stick{position:absolute;left:34px;top:34px;width:48px;height:48px;border-radius:50%;background:#fff9}
+.btn{position:absolute;width:64px;height:64px;border-radius:50%;border:2px solid #fff9;background:#0008;color:#fff;font-size:23px;font-weight:bold;pointer-events:auto}
+#jump{right:25px;bottom:112px}
+#break{right:103px;bottom:max(22px,env(safe-area-inset-bottom))}
+#place{right:25px;bottom:max(22px,env(safe-area-inset-bottom))}
+#blockbar{position:absolute;left:50%;bottom:max(20px,env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:5px;background:#0008;padding:5px;border-radius:10px;pointer-events:auto}
+.slot{width:38px;height:38px;border:2px solid #fff7;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.slot.active{border-color:#ffe56b;box-shadow:0 0 0 2px #ffe56b inset}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="menu">
+ <div class="panel">
+  <h1>⛏️ RealBlock</h1>
+  <p class="sub">Sobreviva, explore e construa.</p>
+  <p>🕹️ Ande no joystick<br>👆 Arraste a tela para olhar<br>⛏️ Quebre blocos • 🧱 Construa • ⬆️ Pule</p>
+  <button id="play">JOGAR</button>
+ </div>
+</div>
+
+<div id="hud">
+ <div id="info">REALBLOCK</div><div id="cross"></div>
+ <div id="joystick"><div id="stick"></div></div>
+ <button class="btn" id="jump">↑</button>
+ <button class="btn" id="break">⛏</button>
+ <button class="btn" id="place">＋</button>
+ <div id="blockbar">
+  <div class="slot active" data-b="stone">⬜</div>
+  <div class="slot" data-b="dirt">🟫</div>
+  <div class="slot" data-b="wood">🪵</div>
+  <div class="slot" data-b="sand">🟨</div>
+ </div>
+</div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W,H,D=1;
+function resize(){W=innerWidth;H=innerHeight;D=Math.min(devicePixelRatio||1,2);canvas.width=W*D;canvas.height=H*D;ctx.setTransform(D,0,0,D,0,0)}
+addEventListener("resize",resize);resize();
+
+const SIZE=24, world=[];
+const C={grass:"#55a63e",dirt:"#8a5931",stone:"#777b80",sand:"#d8c27b",wood:"#8a572d",leaf:"#3d9148"};
+function gen(){
+ for(let x=0;x<SIZE;x++){world[x]=[];for(let z=0;z<SIZE;z++){
+   let h=Math.max(2,Math.min(7,4+Math.floor(Math.sin(x*.55)+Math.cos(z*.45))));
+   world[x][z]=[];
+   for(let y=0;y<h;y++)world[x][z][y]=y===h-1?"grass":y<2?"dirt":"stone";
+ }}
+ for(let i=0;i<14;i++){
+  let x=2+Math.random()*(SIZE-4)|0,z=2+Math.random()*(SIZE-4)|0,h=world[x][z].length;
+  for(let y=0;y<4;y++)world[x][z][h+y]="wood";
+  for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=2;dy<=4;dy++){
+   let xx=x+dx,zz=z+dz;if(xx>=0&&xx<SIZE&&zz>=0&&zz<SIZE&&Math.abs(dx)+Math.abs(dz)<=3)
+    world[xx][zz][h+dy]??="leaf";
+  }
+ }
+}
+gen();
+
+let px=SIZE/2,pz=SIZE/2,py=9,yv=0,yaw=.7,pitch=.04;
+let moving=false,mx=0,my=0,last=null,selected="stone",running=false;
+
+function ground(x,z){return world[Math.max(0,Math.min(SIZE-1,x|0))][Math.max(0,Math.min(SIZE-1,z|0))].length}
+function proj(x,y,z){
+ let dx=x-px,dz=z-pz,dy=y-py,cy=Math.cos(yaw),sy=Math.sin(yaw);
+ let rx=dx*cy-dz*sy,rz=dx*sy+dz*cy,cp=Math.cos(pitch),sp=Math.sin(pitch);
+ let ry=dy*cp-rz*sp,zz=dy*sp+rz*cp;
+ if(zz<.15)return null;let f=Math.min(W,H)*.9;
+ return [W/2+rx*f/zz,H/2-ry*f/zz,zz];
+}
+function shade(h,k){let n=parseInt(h.slice(1),16),r=n>>16&255,g=n>>8&255,b=n&255;return`rgb(${Math.min(255,r*k)|0},${Math.min(255,g*k)|0},${Math.min(255,b*k)|0})`}
+function face(p,c){ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);for(let i=1;i<p.length;i++)ctx.lineTo(p[i][0],p[i][1]);ctx.closePath();ctx.fillStyle=c;ctx.fill();ctx.strokeStyle="#0002";ctx.stroke()}
+function cube(x,y,z,t){
+ let p=[proj(x,y,z),proj(x+1,y,z),proj(x+1,y+1,z),proj(x,y+1,z),proj(x,y,z+1),proj(x+1,y,z+1),proj(x+1,y+1,z+1),proj(x,y+1,z+1)];
+ if(p.some(v=>!v))return;
+ let q=C[t]||"#aaa";
+ face([p[0],p[1],p[2],p[3]],q);
+ face([p[1],p[5],p[6],p[2]],shade(q,.82));
+ face([p[5],p[4],p[7],p[6]],shade(q,.66));
+ face([p[4],p[0],p[3],p[7]],shade(q,.72));
+ face([p[3],p[2],p[6],p[7]],shade(q,1.14));
+ face([p[4],p[5],p[1],p[0]],shade(q,.58));
+}
+function render(){
+ if(!running)return;
+ let sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,"#63b9eb");sky.addColorStop(1,"#e2f6ff");ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+ let arr=[];
+ for(let x=0;x<SIZE;x++)for(let z=0;z<SIZE;z++)for(let y=0;y<world[x][z].length;y++){let p=proj(x,y,z);if(p)arr.push({x,y,z,t:world[x][z][y],d:p[2]})}
+ arr.sort((a,b)=>b.d-a.d);arr.forEach(b=>cube(b.x,b.y,b.z,b.t));
+}
+function tick(){
+ if(!running)return;
+ px+=Math.cos(yaw)*mx*.055+Math.sin(yaw)*my*.055;
+ pz+=Math.sin(yaw)*mx*.055-Math.cos(yaw)*my*.055;
+ px=Math.max(1,Math.min(SIZE-2,px));pz=Math.max(1,Math.min(SIZE-2,pz));
+ yv-=.012;py+=yv;let g=ground(px,pz)+1.6;if(py<g){py=g;yv=0}
+ render();requestAnimationFrame(tick);
+}
+
+document.getElementById("play").onclick=()=>{document.getElementById("menu").style.display="none";running=true;render();tick()};
+
+const joy=document.getElementById("joystick"),stick=document.getElementById("stick");
+joy.addEventListener("touchmove",e=>{e.preventDefault();let r=joy.getBoundingClientRect(),t=e.touches[0],x=t.clientX-r.left-r.width/2,y=t.clientY-r.top-r.height/2,m=Math.min(39,Math.hypot(x,y)),a=Math.atan2(y,x);x=Math.cos(a)*m;y=Math.sin(a)*m;stick.style.transform=`translate(${x}px,${y}px)`;mx=x/39;my=y/39},{passive:false});
+function stopJoy(){mx=my=0;stick.style.transform="translate(0,0)"}
+joy.addEventListener("touchend",stopJoy);joy.addEventListener("touchcancel",stopJoy);
+
+document.body.addEventListener("touchstart",e=>{if(!running||e.target.closest("#joystick,.btn,#blockbar"))return;let t=e.touches[0];last={x:t.clientX,y:t.clientY}},{passive:false});
+document.body.addEventListener("touchmove",e=>{if(!last)return;let t=e.touches[0],dx=t.clientX-last.x,dy=t.clientY-last.y;yaw+=dx*.008;pitch=Math.max(-.8,Math.min(.8,pitch+dy*.006));last={x:t.clientX,y:t.clientY};e.preventDefault()},{passive:false});
+document.body.addEventListener("touchend",()=>last=null);
+
+document.getElementById("jump").ontouchstart=e=>{e.preventDefault();if(Math.abs(yv)<.02)yv=.19};
+function edit(add){
+ let x=Math.floor(px+Math.sin(yaw)*2),z=Math.floor(pz-Math.cos(yaw)*2);
+ if(x<0||z<0||x>=SIZE||z>=SIZE)return;
+ if(add)world[x][z].push(selected);else if(world[x][z].length>1)world[x][z].pop();
+ render();
+}
+document.getElementById("break").ontouchstart=e=>{e.preventDefault();edit(false)}
+document.getElementById("place").ontouchstart=e=>{e.preventDefault();edit(true)}
+document.querySelectorAll(".slot").forEach(s=>s.ontouchstart=()=>{selected=s.dataset.b;document.querySelectorAll(".slot").forEach(a=>a.classList.remove("active"));s.classList.add("active")});
+</script>
+</body>
+</html>
